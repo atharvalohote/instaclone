@@ -1,15 +1,32 @@
 const Post = require('../models/Post');
 const User = require('../models/User');
 
+// Get all posts for feed (public)
+exports.getFeedPosts = async (req, res) => {
+  try {
+    const posts = await Post.find()
+      .populate('user', 'username avatar')
+      .populate('likes', 'username')
+      .populate('comments.user', 'username avatar')
+      .sort({ createdAt: -1 })
+      .limit(20);
+    
+    res.json(posts);
+  } catch (err) {
+    console.error('Get Feed Error:', err.message);
+    res.status(500).send('Server Error');
+  }
+};
+
 // Create a new post
 exports.createPost = async (req, res) => {
+  const { caption, image } = req.body;
+  
+  if (!image) {
+    return res.status(400).json({ msg: 'Image URL is required' });
+  }
+
   try {
-    const { caption, image } = req.body;
-
-    if (!image) {
-      return res.status(400).json({ msg: 'Image URL is required' });
-    }
-
     const newPost = new Post({
       user: req.user.id,
       image: image,
@@ -17,32 +34,30 @@ exports.createPost = async (req, res) => {
     });
 
     const post = await newPost.save();
-    await post.populate('user', ['username', 'avatar']);
+    const populatedPost = await Post.findById(post._id)
+      .populate('user', 'username avatar')
+      .populate('likes', 'username')
+      .populate('comments.user', 'username avatar');
 
-    res.json(post);
+    res.json(populatedPost);
   } catch (err) {
     console.error('Create Post Error:', err.message);
     res.status(500).send('Server Error');
   }
 };
 
-// Get feed posts (posts from followed users)
-exports.getFeedPosts = async (req, res) => {
+// Get posts by specific user
+exports.getUserPosts = async (req, res) => {
   try {
-    const user = await User.findById(req.user.id);
-    const following = user.following || [];
+    const posts = await Post.find({ user: req.params.userId })
+      .populate('user', 'username avatar')
+      .populate('likes', 'username')
+      .populate('comments.user', 'username avatar')
+      .sort({ createdAt: -1 });
     
-    // Get posts from user and followed users
-    const posts = await Post.find({
-      user: { $in: [req.user.id, ...following] }
-    })
-    .populate('user', ['username', 'avatar'])
-    .populate('comments.user', ['username', 'avatar'])
-    .sort({ createdAt: -1 });
-
     res.json(posts);
   } catch (err) {
-    console.error('Get Feed Posts Error:', err.message);
+    console.error('Get User Posts Error:', err.message);
     res.status(500).send('Server Error');
   }
 };
@@ -56,18 +71,25 @@ exports.likePost = async (req, res) => {
       return res.status(404).json({ msg: 'Post not found' });
     }
 
-    const likeIndex = post.likes.indexOf(req.user.id);
+    // Check if user already liked the post
+    const alreadyLiked = post.likes.includes(req.user.id);
     
-    if (likeIndex > -1) {
+    if (alreadyLiked) {
       // Unlike
-      post.likes.splice(likeIndex, 1);
+      post.likes = post.likes.filter(like => like.toString() !== req.user.id);
     } else {
       // Like
       post.likes.push(req.user.id);
     }
 
     await post.save();
-    res.json(post);
+    
+    const updatedPost = await Post.findById(req.params.id)
+      .populate('user', 'username avatar')
+      .populate('likes', 'username')
+      .populate('comments.user', 'username avatar');
+
+    res.json(updatedPost);
   } catch (err) {
     console.error('Like Post Error:', err.message);
     res.status(500).send('Server Error');
@@ -76,13 +98,13 @@ exports.likePost = async (req, res) => {
 
 // Comment on a post
 exports.commentOnPost = async (req, res) => {
-  try {
-    const { text } = req.body;
-    
-    if (!text) {
-      return res.status(400).json({ msg: 'Comment text is required' });
-    }
+  const { text } = req.body;
+  
+  if (!text) {
+    return res.status(400).json({ msg: 'Comment text is required' });
+  }
 
+  try {
     const post = await Post.findById(req.params.id);
     
     if (!post) {
@@ -91,32 +113,21 @@ exports.commentOnPost = async (req, res) => {
 
     const newComment = {
       user: req.user.id,
-      text: text
+      text: text,
+      date: new Date()
     };
 
-    post.comments.unshift(newComment);
+    post.comments.push(newComment);
     await post.save();
     
-    await post.populate('comments.user', ['username', 'avatar']);
-    
-    res.json(post);
+    const updatedPost = await Post.findById(req.params.id)
+      .populate('user', 'username avatar')
+      .populate('likes', 'username')
+      .populate('comments.user', 'username avatar');
+
+    res.json(updatedPost);
   } catch (err) {
     console.error('Comment Post Error:', err.message);
-    res.status(500).send('Server Error');
-  }
-};
-
-// Get user's posts
-exports.getUserPosts = async (req, res) => {
-  try {
-    const posts = await Post.find({ user: req.params.userId })
-      .populate('user', ['username', 'avatar'])
-      .populate('comments.user', ['username', 'avatar'])
-      .sort({ createdAt: -1 });
-
-    res.json(posts);
-  } catch (err) {
-    console.error('Get User Posts Error:', err.message);
     res.status(500).send('Server Error');
   }
 };

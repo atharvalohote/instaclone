@@ -4,19 +4,21 @@ const express = require('express');
 const router = express.Router();
 const auth = require('../middleware/auth');
 const upload = require('../middleware/upload');
-
-// Import the controller functions
 const { 
   getUserProfile, 
   followUser, 
   searchUsers, 
-  updateProfile 
+  updateProfile,
+  getAllUsers
 } = require('../controllers/userController');
 
-// User routes
-router.get('/profile/:userId', auth, getUserProfile);
+// Public routes (no auth required)
+router.get('/profile/:userId', getUserProfile); // Public profile
+router.get('/search', searchUsers); // Public search
+router.get('/discover', getAllUsers); // Public user discovery
+
+// Protected routes (auth required)
 router.put('/follow/:userId', auth, followUser);
-router.get('/search', auth, searchUsers);
 router.put('/profile', auth, upload.single('avatar'), updateProfile);
 
 module.exports = router;

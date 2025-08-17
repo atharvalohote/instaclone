@@ -1,19 +1,28 @@
 // controllers/userController.js
 const User = require('../models/User');
+const Post = require('../models/Post');
 
-// Get user profile
+// Get user profile (public)
 exports.getUserProfile = async (req, res) => {
   try {
     const user = await User.findById(req.params.userId)
       .select('-password')
-      .populate('followers', ['username', 'avatar'])
-      .populate('following', ['username', 'avatar']);
-
+      .populate('followers', 'username avatar')
+      .populate('following', 'username avatar');
+    
     if (!user) {
       return res.status(404).json({ msg: 'User not found' });
     }
 
-    res.json(user);
+    // Get user's posts count
+    const postsCount = await Post.countDocuments({ user: req.params.userId });
+
+    const profile = {
+      ...user.toObject(),
+      postsCount
+    };
+
+    res.json(profile);
   } catch (err) {
     console.error('Get User Profile Error:', err.message);
     res.status(500).send('Server Error');
@@ -23,7 +32,7 @@ exports.getUserProfile = async (req, res) => {
 // Follow/Unfollow user
 exports.followUser = async (req, res) => {
   try {
-    if (req.params.userId === req.user.id) {
+    if (req.user.id === req.params.userId) {
       return res.status(400).json({ msg: 'You cannot follow yourself' });
     }
 
@@ -53,10 +62,12 @@ exports.followUser = async (req, res) => {
     await currentUser.save();
     await userToFollow.save();
 
-    res.json({ 
-      following: currentUser.following,
-      followers: userToFollow.followers 
-    });
+    const updatedUser = await User.findById(req.params.userId)
+      .select('-password')
+      .populate('followers', 'username avatar')
+      .populate('following', 'username avatar');
+
+    res.json(updatedUser);
   } catch (err) {
     console.error('Follow User Error:', err.message);
     res.status(500).send('Server Error');
@@ -69,16 +80,16 @@ exports.searchUsers = async (req, res) => {
     const { q } = req.query;
     
     if (!q) {
-      return res.status(400).json({ msg: 'Search query is required' });
+      return res.json([]);
     }
 
     const users = await User.find({
       $or: [
         { username: { $regex: q, $options: 'i' } },
-        { email: { $regex: q, $options: 'i' } }
+        { bio: { $regex: q, $options: 'i' } }
       ]
     })
-    .select('-password')
+    .select('username avatar bio followers following')
     .limit(10);
 
     res.json(users);
@@ -92,12 +103,12 @@ exports.searchUsers = async (req, res) => {
 exports.updateProfile = async (req, res) => {
   try {
     const { username, bio } = req.body;
-    const avatarUrl = req.file ? req.file.path : null;
+    const avatar = req.file ? req.file.path : undefined;
 
     const updateFields = {};
     if (username) updateFields.username = username;
     if (bio) updateFields.bio = bio;
-    if (avatarUrl) updateFields.avatar = avatarUrl;
+    if (avatar) updateFields.avatar = avatar;
 
     const user = await User.findByIdAndUpdate(
       req.user.id,
@@ -108,6 +119,21 @@ exports.updateProfile = async (req, res) => {
     res.json(user);
   } catch (err) {
     console.error('Update Profile Error:', err.message);
+    res.status(500).send('Server Error');
+  }
+};
+
+// Get all users (for discovery)
+exports.getAllUsers = async (req, res) => {
+  try {
+    const users = await User.find()
+      .select('username avatar bio followers following')
+      .limit(20)
+      .sort({ createdAt: -1 });
+
+    res.json(users);
+  } catch (err) {
+    console.error('Get All Users Error:', err.message);
     res.status(500).send('Server Error');
   }
 };
